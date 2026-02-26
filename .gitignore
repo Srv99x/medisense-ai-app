@@ -1,0 +1,30 @@
+# =============================================================================
+#  MediSense AI - Backend .gitignore
+#  This tells Git which files to NEVER commit to your repository.
+# =============================================================================
+
+# Python cache files (auto-generated, not needed in Git)
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment folders (generated locally, huge, not for Git)
+venv/
+.venv/
+env/
+.env_folder/
+
+# --- SECRETS — NEVER COMMIT THESE ---
+# The .env file contains your real API keys. Keep it private!
+.env
+.env.*
+# But commit the safe template so others know what vars to set:
+!.env.example
+
+# IDE / Editor files
+.vscode/
+.idea/
+*.suo
+*.swp
