@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Dark background -->
+  <rect width="64" height="64" rx="12" fill="#0d1b2a"/>
+
+  <!-- ECG / heartbeat waveform path in cyan, styled as an "M" -->
+  <!-- Starts left, rises to left peak, dips to middle valley, rises to right peak, ends right -->
+  <polyline
+    points="6,40 14,40 18,22 24,52 32,18 38,46 42,40 58,40"
+    fill="none"
+    stroke="#00E5CC"
+    stroke-width="4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>
