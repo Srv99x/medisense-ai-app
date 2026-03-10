@@ -19,14 +19,13 @@
 
 ## 🖼️ Screenshots
 
+> *Add screenshots to `docs/screenshots/` and update paths below*
 
 | Symptom Input | Analysis Results |
 |---------------|-----------------|
 
-| ![Input Screen](<img width="1919" height="980" alt="input png" src="https://github.com/user-attachments/assets/d763bf29-5deb-495a-825c-78943ace0907" />
-
-) | ![Results Screen](<img width="1919" height="977" alt="op" src="https://github.com/user-attachments/assets/d75e5a5e-be65-4ea0-9a9b-f1614d84a8c8" />
-) |
+| ![Input-Output Screen](<img width="1236" height="2750" alt="image" src="https://github.com/user-attachments/assets/5645ddc9-329a-4296-a315-0f0cc4554275" />
+) | 
 
 ---
 
