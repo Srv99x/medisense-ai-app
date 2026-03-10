@@ -15,20 +15,6 @@
 
 </div>
 
----
-
-## 🖼️ Screenshots
-
-> *Add screenshots to `docs/screenshots/` and update paths below*
-
-| Symptom Input | Analysis Results |
-|---------------|-----------------|
-
-| ![Input-Output Screen](<img width="1236" height="2750" alt="image" src="https://github.com/user-attachments/assets/5645ddc9-329a-4296-a315-0f0cc4554275" />
-) | 
-
----
-
 ## 🤔 Why MediSense?
 
 Most AI health tools just return a wall of text. MediSense is different:
