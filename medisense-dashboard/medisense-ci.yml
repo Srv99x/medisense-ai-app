@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  # ── Backend: Python / FastAPI ──────────────────────────────────────────────
+  backend:
+    name: Backend (Python)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install flake8 pytest
+
+      - name: Lint with flake8
+        run: |
+          # Fail on syntax errors or undefined names
+          flake8 main.py --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Warn on style (non-blocking)
+          flake8 main.py --count --exit-zero --max-line-length=120 --statistics
+
+  # ── Frontend: React / TypeScript ──────────────────────────────────────────
+  frontend:
+    name: Frontend (React + TypeScript)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: medisense-dashboard/package-lock.json
+
+      - name: Install dependencies
+        working-directory: medisense-dashboard
+        run: npm ci
+
+      - name: Type check
+        working-directory: medisense-dashboard
+        run: npx tsc --noEmit
+
+      - name: Build
+        working-directory: medisense-dashboard
+        env:
+          VITE_API_URL: http://localhost:8000
+        run: npm run build
