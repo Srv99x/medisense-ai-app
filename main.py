@@ -1,285 +1,292 @@
 """
 =============================================================================
-  MediSense AI - FastAPI Backend
+  MediSense AI - FastAPI Backend (Security-Hardened)
   File: main.py
-  Description: This is the main server file. It creates a web server using
-               FastAPI that listens for symptom data, sends it to Google's
-               Gemini API for analysis, and returns the AI's response.
 
-  ⭐ SWITCHED FROM: OpenAI GPT (paid, quota limited)
-  ⭐ SWITCHED TO:   Google Gemini API (FREE tier available!)
-                   Free tier: 15 requests/min, 1500 requests/day
-                   Get your free key at: https://aistudio.google.com/apikey
-
-=============================================================================
-
-  HOW IT WORKS (Simple Flow):
-  1. Your frontend sends a POST request to /api/analyze with a JSON body
-     containing a "symptoms" string, e.g. { "symptoms": "headache and fever" }
-  2. This server receives the symptoms.
-  3. It forwards the symptoms to the Google Gemini API as a prompt.
-  4. Gemini sends back an AI-generated analysis in JSON format.
-  5. This server sends that JSON analysis back to your frontend.
-
+  SECURITY HARDENING CHANGELOG:
+  [1] Startup guard  — server refuses to start if GEMINI_API_KEY is missing.
+  [2] Rate limiting  — slowapi enforces 10 requests/minute per client IP on
+                       /api/analyze to prevent quota abuse.
+  [3] Input length   — symptoms are rejected if > 2000 characters.
+  [4] Input sanitation — control characters stripped to block prompt injection.
+  [5] Safe errors    — raw Python exceptions are NEVER returned to callers;
+                       a generic message is sent and the real error logged only.
+  [6] Disclaimer     — canonical disclaimer forcibly written into every
+                       response, even if Gemini omits or alters it.
+  [7] CORS warning   — a startup log warns loudly when wildcard CORS is active.
 =============================================================================
 """
 
 # --- IMPORTS ---
-# We import all the libraries (tools) we need for this server to work.
-
-# 'os' lets us read environment variables (like our secret API key) from the system.
 import os
-
-# 'json' lets us convert text into Python dictionaries and vice versa.
+import re
 import json
+import logging
 
-# 'dotenv' reads the .env file and loads the variables inside it into our environment.
-# This is how we keep secrets (like API keys) OUT of our code.
 from dotenv import load_dotenv
 
-# 'FastAPI' is the web framework we use to create our server and define routes.
-# 'HTTPException' lets us send back proper error messages with HTTP status codes.
-from fastapi import FastAPI, HTTPException
-
-# 'CORSMiddleware' handles Cross-Origin Resource Sharing (CORS).
-# Without this, web browsers BLOCK requests from a frontend (e.g., on port 5500)
-# to a backend on a different port (e.g., port 8000). This middleware says "it's OK".
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-# 'BaseModel' from Pydantic lets us define the exact shape of data we expect to receive.
-# FastAPI uses this to automatically validate incoming request data.
-from pydantic import BaseModel
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
-# 'genai' is the official Google Generative AI Python library for talking to Gemini.
+from pydantic import BaseModel, field_validator
+
 import google.generativeai as genai
+
+
+# =============================================================================
+# Logging Setup
+# =============================================================================
+# Use the standard logging module so sensitive details stay in server logs,
+# never in HTTP responses returned to clients.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(message)s",
+)
+logger = logging.getLogger("medisense")
 
 
 # =============================================================================
 # STEP 1: Load Environment Variables
 # =============================================================================
-# This reads the .env file in the same folder and loads the values inside it.
-# After this line runs, we can access our API key using os.getenv().
 load_dotenv()
 
 
 # =============================================================================
-# STEP 2: Create the FastAPI Application Instance
+# STEP 2: Read & Validate the API Key at Startup
 # =============================================================================
-# 'app' is our server object. All our routes (endpoints) will be attached to it.
+# SECURITY FIX [1]: If the key is absent the server refuses to start with a
+# clear error rather than crashing on the first real request.
+api_key = os.getenv("GEMINI_API_KEY")
+if not api_key:
+    raise RuntimeError(
+        "GEMINI_API_KEY is not set. "
+        "Create a .env file with your key (see .env.example) and restart."
+    )
+
+genai.configure(api_key=api_key)
+
+
+# =============================================================================
+# STEP 3: Rate Limiter Setup
+# =============================================================================
+# SECURITY FIX [2]: slowapi provides in-process, per-IP rate limiting.
+# Each client IP may call /api/analyze at most 10 times per minute.
+# Exceeding the limit returns HTTP 429 Too Many Requests automatically.
+limiter = Limiter(key_func=get_remote_address)
+
+
+# =============================================================================
+# STEP 4: Create the FastAPI Application
+# =============================================================================
 app = FastAPI(
     title="MediSense AI API",
-    description="A FastAPI backend that analyzes patient symptoms using Google Gemini.",
-    version="2.0.0",
+    description="A FastAPI backend that analyses patient symptoms using Google Gemini.",
+    version="3.0.0",
 )
 
+# Attach the rate-limiter state and its error handler to the app.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 
 # =============================================================================
-# STEP 3: Add CORS Middleware
+# STEP 5: CORS Middleware
 # =============================================================================
-# This is CRITICAL for allowing your frontend to talk to this server.
-# Browsers enforce a "Same-Origin Policy" — they block requests between different
-# origins (domains/ports). CORS Middleware tells the browser: "Requests from
-# any origin are allowed."
-#
-# For production, replace allow_origins=["*"] with your specific frontend URL.
-# Read the allowed frontend origin from an environment variable.
-# - In production on Render: set FRONTEND_URL=https://your-app.vercel.app
-# - In local development: leave it unset — it defaults to "*" so everything works.
+# SECURITY FIX [7]: Log a visible warning when CORS is open to all origins
+# so developers know they must lock it down before going to production.
 FRONTEND_URL = os.getenv("FRONTEND_URL", "*")
-
-# If a specific URL is provided, use only that. Otherwise allow all origins.
 allowed_origins = [FRONTEND_URL] if FRONTEND_URL != "*" else ["*"]
+
+if FRONTEND_URL == "*":
+    logger.warning(
+        "⚠️  SECURITY WARNING: CORS is open to ALL origins (FRONTEND_URL not set). "
+        "Set FRONTEND_URL=https://your-app.vercel.app in production!"
+    )
+else:
+    logger.info("✅ CORS restricted to: %s", FRONTEND_URL)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,  # Locked to your Vercel URL in production.
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],            # Allows all HTTP methods (GET, POST, etc.)
-    allow_headers=["*"],            # Allows all headers (Content-Type, etc.)
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
 # =============================================================================
-# STEP 4: Initialize the Google Gemini Client
+# STEP 6: Gemini Model
 # =============================================================================
-# We read the API key from the environment and configure the Gemini library.
-# Get your FREE key at: https://aistudio.google.com/apikey
-api_key = os.getenv("GEMINI_API_KEY")
-if not api_key:
-    print("⚠️  WARNING: GEMINI_API_KEY not found in environment variables!")
-    print("   Please create a .env file with your API key. See .env.example for details.")
-    print("   Get a free key at: https://aistudio.google.com/apikey")
-
-# Configure the Gemini library with your API key.
-genai.configure(api_key=api_key)
-
-# Create the Gemini model instance.
-# "gemini-1.5-flash" is fast, capable, and available on the FREE tier.
-# Free tier limits: 15 requests/minute, 1500 requests/day — plenty for development!
 model = genai.GenerativeModel(
     model_name="gemini-2.5-flash",
-    # ⭐ CRUCIAL: This forces Gemini to ALWAYS return a valid JSON object.
-    # This is the Gemini equivalent of OpenAI's response_format={"type": "json_object"}.
     generation_config=genai.types.GenerationConfig(
         response_mime_type="application/json",
-        temperature=0.2,  # Low temperature = consistent, deterministic responses
+        temperature=0.2,
     ),
 )
 
 
 # =============================================================================
-# STEP 5: Define the Request Body Model (Data Shape Validation)
+# STEP 7: Constants
 # =============================================================================
-# This class defines what data we EXPECT to receive in the POST request body.
-# Pydantic will automatically validate that "symptoms" is present and is a string.
-class SymptomRequest(BaseModel):
-    """Defines the expected shape of the incoming JSON request body."""
+MAX_SYMPTOMS_LENGTH = 2000  # characters
 
-    # 'symptoms' is a required string field.
-    # Example value: "I have a headache, fever, and sore throat for 2 days."
+# The canonical disclaimer that will be injected into EVERY response,
+# overriding whatever the model returns, to ensure it is never omitted.
+CANONICAL_DISCLAIMER = (
+    "EDUCATIONAL TOOL ONLY — THIS IS NOT A SUBSTITUTE FOR "
+    "PROFESSIONAL MEDICAL ADVICE, DIAGNOSIS, OR TREATMENT. "
+    "Always seek the guidance of a qualified health provider with "
+    "any questions you may have regarding a medical condition."
+)
+
+# Regex for stripping characters that have no place in a symptom description
+# and could be used for prompt injection (null bytes, control chars, etc.).
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+# =============================================================================
+# STEP 8: Request Model with Server-Side Validation
+# =============================================================================
+class SymptomRequest(BaseModel):
+    """Defines and validates the incoming JSON request body."""
+
     symptoms: str
 
+    # SECURITY FIX [3]: Enforce maximum length on the backend.
+    # The frontend also has maxLength=2000 but the backend must not trust it.
+    @field_validator("symptoms")
+    @classmethod
+    def symptoms_must_be_valid(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Symptoms cannot be empty.")
+        if len(stripped) > MAX_SYMPTOMS_LENGTH:
+            raise ValueError(
+                f"Symptoms must be {MAX_SYMPTOMS_LENGTH} characters or fewer "
+                f"(received {len(stripped)})."
+            )
+        return stripped
+
 
 # =============================================================================
-# STEP 6: Define the System Prompt for Gemini
+# STEP 9: System Prompt
 # =============================================================================
-# The SYSTEM PROMPT tells the AI model WHO it is and HOW it should behave.
-# You mentioned you will provide the final prompt later — replace the text
-# inside the triple-quotes below with your real prompt when you're ready.
-#
-# IMPORTANT: Since we set response_mime_type="application/json", the prompt
-# MUST instruct the model to respond with JSON. The library requires this.
 SYSTEM_PROMPT = """
 You are MediSense AI, a helpful and empathetic medical AI assistant.
-Your role is to analyze patient-reported symptoms and provide a preliminary,
+Your role is to analyse patient-reported symptoms and provide a preliminary,
 informational assessment. You are NOT a replacement for a real doctor.
 
-Always respond with a valid JSON object containing the exact following structure. 
-It is CRITICAL that "possible_conditions" is a list of objects, and "probability" is a number.
+Always respond with a valid JSON object containing EXACTLY the following fields:
 
-Example response format:
 {
   "possible_conditions": [
     {
-      "name": "Common Cold",
+      "name": "Condition Name",
       "probability": 85,
-      "description": "A mild viral infection of the nose and throat."
-    },
-    {
-      "name": "Allergies",
-      "probability": 40,
-      "description": "An immune system reaction to a foreign substance."
+      "description": "Brief description."
     }
   ],
   "urgency_level": "Low",
   "recommendations": [
-    "Rest and drink fluids",
-    "Take over-the-counter fever reducers if needed"
+    "Actionable recommendation 1",
+    "Actionable recommendation 2"
   ],
   "disclaimer": "EDUCATIONAL TOOL ONLY — THIS IS NOT A SUBSTITUTE FOR PROFESSIONAL MEDICAL ADVICE, DIAGNOSIS, OR TREATMENT."
 }
+
+Rules:
+- "possible_conditions" MUST be a list of objects with name (string), probability (integer 0-100), description (string).
+- "urgency_level" MUST be exactly one of: "Low", "Medium", or "High".
+- "recommendations" MUST be a list of strings.
+- "disclaimer" MUST be included and must state that this is not medical advice.
+- Do NOT add extra fields outside the schema above.
 """
-# NOTE TO DEVELOPER: Replace the content of SYSTEM_PROMPT above with your
-# finalized prompt when you're ready!
 
 
 # =============================================================================
-# STEP 7: Define the API Endpoint (The Main Route)
+# STEP 10: Main Analysis Endpoint
 # =============================================================================
-# This is the heart of our API. The @app.post decorator registers this function
-# as a handler for HTTP POST requests to the "/api/analyze" path.
 @app.post("/api/analyze")
-async def analyze_symptoms(request: SymptomRequest):
+@limiter.limit("10/minute")  # SECURITY FIX [2]: Rate-limit by client IP.
+async def analyze_symptoms(request: Request, body: SymptomRequest):
     """
-    Analyzes patient symptoms using the Google Gemini API.
+    Analyses patient symptoms using the Google Gemini API.
 
-    Receives:
-        request (SymptomRequest): A JSON body with a 'symptoms' string.
-
-    Returns:
-        A JSON object with the AI's medical analysis.
+    Rate limit: 10 requests per minute per IP.
+    Input limit: 2000 characters.
     """
 
-    # Safety check: Make sure the symptoms field is not empty or just whitespace.
-    if not request.symptoms.strip():
-        # HTTPException sends a proper HTTP error response back to the client.
-        # Status code 400 means "Bad Request" — the client sent invalid data.
-        raise HTTPException(
-            status_code=400,
-            detail="The 'symptoms' field cannot be empty. Please describe your symptoms."
+    # SECURITY FIX [4]: Strip control/special characters that could be used
+    # for prompt injection before inserting user text into the LLM prompt.
+    safe_symptoms = _CONTROL_CHARS_RE.sub("", body.symptoms)
+
+    logger.info("📨 Analysis request received (%d chars)", len(safe_symptoms))
+
+    try:
+        full_prompt = (
+            f"{SYSTEM_PROMPT}\n\n"
+            f"Please analyse the following symptoms:\n{safe_symptoms}"
         )
 
-    # Good practice: Print a log message so you can see activity in your terminal.
-    print(f"\n📨 Received analysis request.")
-    print(f"   Symptoms: {request.symptoms[:100]}...")  # Only print first 100 chars
-
-    # --- Call the Gemini API ---
-    # We wrap this in a try-except block so that if anything goes wrong
-    # (network error, invalid API key, etc.), we send a friendly message back.
-    try:
-        print("🤖 Sending request to Google Gemini...")
-
-        # Build the full prompt by combining the system instructions with the
-        # user's symptoms. Gemini's generate_content() takes a single prompt string.
-        full_prompt = f"{SYSTEM_PROMPT}\n\nPlease analyze the following symptoms: {request.symptoms}"
-
-        # Make the API call to Gemini.
         response = model.generate_content(full_prompt)
-
-        # Extract the text content from the response object.
         raw_content = response.text
 
-        print("✅ Successfully received response from Gemini.")
+        logger.info("✅ Gemini responded successfully.")
 
-        # Convert the JSON string from Gemini into a Python dictionary.
-        # We then return it directly — FastAPI automatically converts it
-        # back into a JSON HTTP response for the client.
         analysis_result = json.loads(raw_content)
+
+        # SECURITY FIX [6]: Overwrite the disclaimer unconditionally with the
+        # canonical text. This ensures compliance regardless of model output.
+        analysis_result["disclaimer"] = CANONICAL_DISCLAIMER
 
         return analysis_result
 
     except json.JSONDecodeError:
-        # This error means Gemini returned something that isn't valid JSON.
-        # This is rare since we forced application/json response type.
-        print("❌ Error: Could not parse JSON response from Gemini.")
+        # Gemini returned non-JSON (rare when response_mime_type is set).
+        logger.error("❌ Gemini returned invalid JSON.")
         raise HTTPException(
             status_code=500,
-            detail="The AI returned an invalid response format. Please try again."
+            detail="The AI returned an invalid response format. Please try again.",
         )
 
-    except Exception as e:
-        # Catch any other unexpected errors (network issues, invalid API key, etc.)
-        print(f"❌ An unexpected error occurred: {e}")
+    except Exception as exc:
+        # SECURITY FIX [5]: Log the real error server-side but NEVER return
+        # raw exception details (stack traces, internal state) to the caller.
+        logger.error("❌ Unexpected error during analysis: %s", exc, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"An error occurred while contacting the AI service: {str(e)}"
+            detail="An internal error occurred. Please try again later.",
         )
 
 
 # =============================================================================
-# STEP 8: Add a Simple Health-Check Endpoint
+# STEP 11: Health-Check Endpoint
 # =============================================================================
-# A GET request to "/" lets you quickly confirm the server is alive and running.
 @app.get("/")
 def health_check():
-    """A simple health check to confirm the server is running."""
-    return {"status": "ok", "message": "MediSense AI Backend is running! 🩺 (Powered by Gemini)"}
+    """Returns 200 OK so load balancers and uptime monitors can verify liveness."""
+    return {
+        "status": "ok",
+        "message": "MediSense AI Backend is running! 🩺 (Powered by Gemini)",
+    }
 
 
 # =============================================================================
-# STEP 9: Entry Point for Direct Python Execution (Optional)
+# STEP 12: Entry Point for Direct Execution
 # =============================================================================
-# This block only runs if you execute this file DIRECTLY with Python:
-#   > python main.py
-#
-# The RECOMMENDED way to run is: py -m uvicorn main:app --reload
 if __name__ == "__main__":
     import uvicorn
 
-    print("🚀 Starting MediSense AI server (Gemini edition)...")
+    logger.info("🚀 Starting MediSense AI server...")
     uvicorn.run(
-        "main:app",   # "filename:FastAPI_instance_variable"
-        host="0.0.0.0",  # Listen on all network interfaces
-        port=8000,        # Access via http://localhost:8000
-        reload=True,      # Auto-restart when you save changes
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
     )

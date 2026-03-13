@@ -1,10 +1,22 @@
 import { useState } from "react";
-import { Activity, ShieldAlert, Pill, CheckCircle, Brain, AlertTriangle, Loader2 } from "lucide-react";
+import {
+  Activity,
+  ShieldAlert,
+  Pill,
+  CheckCircle,
+  Brain,
+  AlertTriangle,
+  Loader2,
+  XCircle,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 interface Condition {
   name: string;
   probability: number;
@@ -18,53 +30,57 @@ interface AnalysisResult {
   disclaimer: string;
 }
 
-const MOCK_RESULT: AnalysisResult = {
-  possible_conditions: [
-    { name: "Common Cold", probability: 78, description: "Upper respiratory viral infection with typical symptoms including congestion, sore throat, and mild fatigue." },
-    { name: "Seasonal Allergies", probability: 45, description: "Immune response to environmental allergens causing nasal congestion, sneezing, and irritation." },
-    { name: "Acute Sinusitis", probability: 32, description: "Inflammation of the sinus cavities, often following a viral infection, causing facial pressure and congestion." },
-  ],
-  urgency_level: "Low",
-  recommendations: [
-    "Rest and stay hydrated with at least 8 glasses of water daily",
-    "Monitor symptoms for 48-72 hours for any changes",
-    "Consider over-the-counter decongestants for relief",
-    "Schedule a visit with your primary care physician if symptoms persist beyond 7 days",
-    "Avoid strenuous physical activity until symptoms subside",
-  ],
-  disclaimer: "This analysis is for educational purposes only and does not constitute medical advice.",
-};
-
+// ---------------------------------------------------------------------------
+// API helper
+// SECURITY NOTE: The catch block no longer silently falls back to mock data.
+// Network or server errors are surfaced to the user as a visible error state,
+// so they know the AI analysis did NOT succeed.
+// ---------------------------------------------------------------------------
 async function analyzeSymptoms(symptoms: string): Promise<AnalysisResult> {
-  try {
-    const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
-    const res = await fetch(`${apiUrl}/api/analyze`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symptoms }),
-    });
-    if (!res.ok) throw new Error("API error");
-    return await res.json();
-  } catch {
-    // Fallback to mock data for demo
-    await new Promise((r) => setTimeout(r, 2000));
-    return MOCK_RESULT;
+  const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+  const res = await fetch(`${apiUrl}/api/analyze`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ symptoms }),
+  });
+
+  if (!res.ok) {
+    // Try to get the server's error message; fall back to a generic one.
+    let detail = "An error occurred. Please try again.";
+    try {
+      const errorBody = await res.json();
+      if (errorBody?.detail) detail = String(errorBody.detail);
+    } catch {
+      // ignore parse failure
+    }
+    if (res.status === 429) {
+      detail =
+        "Too many requests — you have reached the analysis limit. Please wait a minute and try again.";
+    }
+    throw new Error(detail);
   }
+
+  return res.json();
 }
 
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
 const Waveform = () => (
   <div className="flex items-end gap-1 h-8 mt-4">
-    {[0.2, 0.5, 0.8, 1, 0.6, 0.9, 0.4, 0.7, 1, 0.5, 0.3, 0.8].map((delay, i) => (
-      <div
-        key={i}
-        className="w-1 rounded-full bg-primary/60 animate-waveform"
-        style={{
-          height: "100%",
-          animationDelay: `${delay * 0.3}s`,
-          animationDuration: `${0.8 + delay * 0.6}s`,
-        }}
-      />
-    ))}
+    {[0.2, 0.5, 0.8, 1, 0.6, 0.9, 0.4, 0.7, 1, 0.5, 0.3, 0.8].map(
+      (delay, i) => (
+        <div
+          key={i}
+          className="w-1 rounded-full bg-primary/60 animate-waveform"
+          style={{
+            height: "100%",
+            animationDelay: `${delay * 0.3}s`,
+            animationDuration: `${0.8 + delay * 0.6}s`,
+          }}
+        />
+      )
+    )}
   </div>
 );
 
@@ -83,18 +99,30 @@ const UrgencyBadge = ({ level }: { level: string }) => {
   );
 };
 
+// ---------------------------------------------------------------------------
+// Main Page
+// ---------------------------------------------------------------------------
 const Index = () => {
   const [symptoms, setSymptoms] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const handleAnalyze = async () => {
     if (!symptoms.trim() || loading) return;
     setLoading(true);
     setResult(null);
+    setError(null);
     try {
       const data = await analyzeSymptoms(symptoms);
       setResult(data);
+    } catch (err: unknown) {
+      // Surface the error visibly so the user knows the real AI call failed.
+      setError(
+        err instanceof Error
+          ? err.message
+          : "An unexpected error occurred. Please try again."
+      );
     } finally {
       setLoading(false);
     }
@@ -128,21 +156,43 @@ const Index = () => {
           </div>
         </header>
 
+        {/* === ALWAYS-VISIBLE DISCLAIMER (before submit) === */}
+        {/* SECURITY FIX: Shown unconditionally so every user sees it before
+            interacting, not only after they submit a query. */}
+        <div
+          className="mb-8 glass rounded-2xl p-4 border border-amber-500/30 bg-amber-950/20 flex items-start gap-3"
+          role="note"
+          aria-label="Medical disclaimer"
+        >
+          <ShieldAlert className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-amber-300/90 leading-relaxed">
+            <span className="font-bold">For educational use only.</span> MediSense AI
+            is an AI tool that does{" "}
+            <span className="font-semibold">not</span> provide medical advice,
+            diagnosis, or treatment. Always consult a qualified healthcare
+            professional for medical concerns.
+          </p>
+        </div>
+
         {/* Input Section */}
         <section className="mb-12">
           <div className="glass rounded-2xl p-6 glow-cyan">
             <Textarea
+              id="symptoms-input"
               value={symptoms}
               onChange={(e) => setSymptoms(e.target.value)}
               placeholder="Describe your symptoms in detail — onset, duration, severity, and any related factors..."
               className="min-h-[160px] bg-transparent border-none text-foreground placeholder:text-muted-foreground text-base resize-none focus-visible:ring-0 focus-visible:ring-offset-0"
               maxLength={2000}
+              aria-label="Symptom description"
+              aria-describedby="char-count"
             />
             <div className="flex items-center justify-between mt-4">
-              <span className="text-xs text-muted-foreground">
+              <span id="char-count" className="text-xs text-muted-foreground">
                 {symptoms.length} / 2000 characters
               </span>
               <Button
+                id="analyze-button"
                 onClick={handleAnalyze}
                 disabled={loading || !symptoms.trim()}
                 className="bg-gradient-to-r from-primary to-accent text-primary-foreground font-semibold px-8 py-5 text-base rounded-xl shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all duration-300 disabled:opacity-40"
@@ -163,6 +213,22 @@ const Index = () => {
             </div>
           </div>
         </section>
+
+        {/* === ERROR STATE === */}
+        {/* SECURITY FIX: Replaced silent mock-data fallback with a visible error. */}
+        {error && (
+          <section
+            className="mb-8 glass rounded-2xl p-5 border border-red-500/40 bg-red-950/20 flex items-start gap-3 animate-fade-in"
+            role="alert"
+            aria-live="assertive"
+          >
+            <XCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-red-400">Analysis Failed</p>
+              <p className="text-sm text-red-300/80 mt-1">{error}</p>
+            </div>
+          </section>
+        )}
 
         {/* Results Dashboard */}
         {result && (
@@ -195,7 +261,9 @@ const Index = () => {
                       <div className="mb-3">
                         <div className="flex justify-between text-xs mb-1">
                           <span className="text-muted-foreground">Probability</span>
-                          <span className="text-primary font-medium">{condition.probability}%</span>
+                          <span className="text-primary font-medium">
+                            {condition.probability}%
+                          </span>
                         </div>
                         <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                           <div
@@ -221,7 +289,11 @@ const Index = () => {
               </h2>
               <div className="glass rounded-2xl p-6 space-y-4">
                 {result.recommendations.map((rec, i) => (
-                  <div key={i} className="flex items-start gap-3 animate-fade-in" style={{ animationDelay: `${i * 0.08}s` }}>
+                  <div
+                    key={i}
+                    className="flex items-start gap-3 animate-fade-in"
+                    style={{ animationDelay: `${i * 0.08}s` }}
+                  >
                     <div className="mt-0.5 w-6 h-6 rounded-full bg-accent/20 flex items-center justify-center flex-shrink-0">
                       <CheckCircle className="w-3.5 h-3.5 text-accent" />
                     </div>
@@ -230,15 +302,26 @@ const Index = () => {
                 ))}
               </div>
             </div>
+
+            {/* Per-result disclaimer (from server, canonical text injected backend-side) */}
+            {result.disclaimer && (
+              <div className="glass rounded-2xl p-4 border border-amber-500/30 bg-amber-950/10 flex items-start gap-3">
+                <ShieldAlert className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-300/80 leading-relaxed">
+                  {result.disclaimer}
+                </p>
+              </div>
+            )}
           </section>
         )}
 
-        {/* Disclaimer Banner */}
+        {/* Persistent footer disclaimer */}
         <footer className="mt-16 glass rounded-2xl p-5 border-red-500/30 bg-red-950/20">
           <div className="flex items-center gap-3">
             <ShieldAlert className="w-6 h-6 text-red-400 flex-shrink-0" />
             <p className="text-sm font-semibold text-red-400">
-              EDUCATIONAL TOOL ONLY — THIS IS NOT A SUBSTITUTE FOR PROFESSIONAL MEDICAL ADVICE, DIAGNOSIS, OR TREATMENT.
+              EDUCATIONAL TOOL ONLY — THIS IS NOT A SUBSTITUTE FOR PROFESSIONAL
+              MEDICAL ADVICE, DIAGNOSIS, OR TREATMENT.
             </p>
           </div>
         </footer>
