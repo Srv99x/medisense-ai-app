@@ -1,9 +1,19 @@
+---
+title: MediSense AI Backend
+emoji: 🩺
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # 🩺 MediSense AI
 
 <div align="center">
 
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-black?style=for-the-badge&logo=vercel)](https://medisense-ai-app.vercel.app)
-[![Backend](https://img.shields.io/badge/API-Render-46E3B7?style=for-the-badge&logo=render)](https://your-api.onrender.com)
+[![Backend](https://img.shields.io/badge/API-HuggingFace%20Spaces-FFD21E?style=for-the-badge&logo=huggingface&logoColor=black)](https://huggingface.co/spaces/Srv99x/medisense-ai-backend)
 [![TypeScript](https://img.shields.io/badge/TypeScript-90%25-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Python-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Gemini](https://img.shields.io/badge/Powered%20by-Gemini%202.5%20Flash-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://aistudio.google.com/)
@@ -37,7 +47,7 @@ MediSense doesn't pretend to be a doctor. It gives you a **structured, readable 
 - 📊 **Condition Probability Cards** — Visual breakdown of possible conditions with probability bars
 - 🚨 **Urgency Level Detection** — Low / Medium / High urgency with color-coded indicators
 - 💊 **Care Recommendations** — Tailored next steps based on your symptoms
-- ⚡ **Instant Fallback** — Curated mock data if the API is unavailable — demos always work
+- ⚡ **Always Responsive** — Powered by Hugging Face Spaces (no cold-start delays)
 - 📱 **Fully Responsive** — Mobile, tablet, and desktop ready
 - 🌐 **Production Deployed** — Vercel (frontend) + Render (backend)
 
@@ -53,7 +63,7 @@ MediSense doesn't pretend to be a doctor. It gives you a **structured, readable 
 | **Backend** | Python 3.10+, FastAPI |
 | **AI Model** | Google Gemini 2.5 Flash (`gemini-2.5-flash`) |
 | **Frontend Hosting** | Vercel |
-| **Backend Hosting** | Render (free tier) |
+| **Backend Hosting** | Hugging Face Spaces (Docker) |
 
 ---
 
@@ -64,7 +74,7 @@ MediSense doesn't pretend to be a doctor. It gives you a **structured, readable 
                               │
                          POST /api/analyze
                               │
-                     [FastAPI Backend (Render)]
+                      [FastAPI Backend (HF Spaces)]
                               │
                     Structured prompt + JSON schema
                               │
@@ -216,17 +226,25 @@ Health check — returns `{ "status": "ok" }`.
 
 ## ☁️ Deployment
 
-### Backend → Render
+### Backend → Hugging Face Spaces
 
-1. Push to GitHub
-2. Create a **New Web Service** on [render.com](https://render.com) pointing to your repo
-3. Set **Start Command**: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-4. Add **Environment Variables**:
+1. Go to [huggingface.co/new-space](https://huggingface.co/new-space)
+2. Set **Space name** to `medisense-ai-backend`, choose **Docker** as the SDK
+3. In your Space → **Settings → Variables and Secrets**, add:
 
 | Variable | Value |
 |----------|-------|
 | `GEMINI_API_KEY` | Your Gemini API key |
 | `FRONTEND_URL` | Your Vercel deployment URL |
+
+4. Add the Space as a Git remote and push:
+
+```bash
+git remote add hf https://huggingface.co/spaces/Srv99x/medisense-ai-backend
+git push hf main
+```
+
+Your API will be live at: `https://Srv99x-medisense-ai-backend.hf.space`
 
 ### Frontend → Vercel
 
@@ -238,7 +256,7 @@ Health check — returns `{ "status": "ok" }`.
 |----------|-------|
 | `VITE_API_URL` | Your Render backend URL |
 
-> **Note:** Render's free tier spins down after 15 min of inactivity. The first request may take ~30s to wake up. The app has built-in fallback mock data so demos always work regardless.
+> **Note:** Hugging Face Spaces (free tier) keeps your Space running persistently — no cold-start spin-up like Render's free tier.
 
 ---
 
