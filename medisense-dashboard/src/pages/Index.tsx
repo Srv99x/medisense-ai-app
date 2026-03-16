@@ -38,7 +38,7 @@ interface AnalysisResult {
 // ---------------------------------------------------------------------------
 async function analyzeSymptoms(symptoms: string): Promise<AnalysisResult> {
   const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
-  const res = await fetch(`${apiUrl}/api/analyze`, {
+  const res = await fetch(`${apiUrl}/api/v1/analyze`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ symptoms }),
