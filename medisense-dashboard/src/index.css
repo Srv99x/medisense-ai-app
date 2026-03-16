@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 47% 6%;
+    --foreground: 180 100% 95%;
+
+    --card: 220 40% 8%;
+    --card-foreground: 180 100% 95%;
+
+    --popover: 220 40% 8%;
+    --popover-foreground: 180 100% 95%;
+
+    --primary: 180 100% 50%;
+    --primary-foreground: 222 47% 6%;
+
+    --secondary: 168 80% 36%;
+    --secondary-foreground: 180 100% 95%;
+
+    --muted: 220 30% 14%;
+    --muted-foreground: 215 20% 55%;
+
+    --accent: 160 84% 39%;
+    --accent-foreground: 180 100% 95%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 200 30% 18%;
+    --input: 200 30% 18%;
+    --ring: 180 100% 50%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 220 40% 8%;
+    --sidebar-foreground: 180 100% 95%;
+    --sidebar-primary: 180 100% 50%;
+    --sidebar-primary-foreground: 222 47% 6%;
+    --sidebar-accent: 220 30% 14%;
+    --sidebar-accent-foreground: 180 100% 95%;
+    --sidebar-border: 200 30% 18%;
+    --sidebar-ring: 180 100% 50%;
+
+    --cyan-glow: 180 100% 50%;
+    --teal-glow: 168 80% 36%;
+    --emerald-glow: 160 84% 39%;
+    --danger: 0 72% 51%;
+    --warning: 38 92% 50%;
+    --success: 142 76% 36%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .text-gradient-glow {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(
+      135deg,
+      hsl(180 100% 50%),
+      hsl(168 80% 36%),
+      hsl(160 84% 39%)
+    );
+  }
+
+  .glass {
+    @apply bg-white/5 backdrop-blur-md border border-white/10;
+  }
+
+  .glow-cyan {
+    box-shadow: 0 0 20px hsl(180 100% 50% / 0.15),
+      0 0 60px hsl(180 100% 50% / 0.05);
+  }
+
+  .glow-border-cyan {
+    box-shadow: 0 0 15px hsl(180 100% 50% / 0.2),
+      inset 0 0 15px hsl(180 100% 50% / 0.05);
+    border-color: hsl(180 100% 50% / 0.3);
+  }
+}
