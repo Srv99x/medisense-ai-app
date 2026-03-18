@@ -4,16 +4,21 @@
   File: main.py
 
   SECURITY HARDENING CHANGELOG:
-  [1] Startup guard  — server refuses to start if GEMINI_API_KEY is missing.
-  [2] Rate limiting  — slowapi enforces 10 requests/minute per client IP on
-                       /api/analyze to prevent quota abuse.
-  [3] Input length   — symptoms are rejected if > 2000 characters.
-  [4] Input sanitation — control characters stripped to block prompt injection.
-  [5] Safe errors    — raw Python exceptions are NEVER returned to callers;
-                       a generic message is sent and the real error logged only.
-  [6] Disclaimer     — canonical disclaimer forcibly written into every
-                       response, even if Gemini omits or alters it.
-  [7] CORS warning   — a startup log warns loudly when wildcard CORS is active.
+  [1] Startup guard   — server refuses to start if GEMINI_API_KEY is missing.
+  [2] Rate limiting   — slowapi enforces 5 req/minute + 100 req/day per IP on
+                        /api/v1/analyze via two stacked decorators.
+  [3] Input length    — symptoms are rejected if > 2000 characters.
+  [4] Input sanitation — ASCII AND Unicode control chars stripped to block
+                        prompt injection (incl. bidi overrides, zero-width,
+                        BOM — see _CONTROL_CHARS_RE).
+  [5] Safe errors     — raw Python exceptions are NEVER returned to callers;
+                        a generic message is sent and the real error logged only.
+  [6] Disclaimer      — canonical disclaimer forcibly written into every
+                        response, even if Gemini omits or alters it.
+  [7] CORS warning    — a startup log warns loudly when wildcard CORS is active.
+  [8] APIRouter       — all v1 routes are registered on an APIRouter with
+                        prefix=/api/v1 for clean versioning.
+  [9] Auth policy     — intentionally public; documented explicitly (see below).
 =============================================================================
 """
 
@@ -25,7 +30,7 @@ import logging
 
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -146,8 +151,18 @@ CANONICAL_DISCLAIMER = (
 )
 
 # Regex for stripping characters that have no place in a symptom description
-# and could be used for prompt injection (null bytes, control chars, etc.).
-_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+# and could be used for prompt injection.
+# Covers:
+#   • ASCII control chars  : \x00-\x08, \x0b, \x0c, \x0e-\x1f, \x7f
+#   • Unicode zero-width   : U+200B–U+200F (zero-width spaces / joiners)
+#   • Unicode bidi overrides: U+202A–U+202E (LTR/RTL/pop directional marks)
+#   • Unicode invisible    : U+2060–U+2064 (word joiner, invisible operators)
+#   • BOM                  : U+FEFF
+_CONTROL_CHARS_RE = re.compile(
+    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f"
+    r"\u200b-\u200f\u202a-\u202e\u2060-\u2064"
+    r"\ufeff]"
+)
 
 
 # =============================================================================
@@ -215,15 +230,36 @@ Rules:
 
 
 # =============================================================================
-# STEP 10: Main Analysis Endpoint
+# STEP 10: APIRouter — All /api/v1 routes
 # =============================================================================
-@app.post("/api/v1/analyze")
-@limiter.limit("10/minute; 100/day")  # SECURITY FIX [2]: Rate-limit by client IP (minute & daily).
+# SECURITY FIX [8]: Routes are registered on a versioned APIRouter so that a
+# future /api/v2 router can be added without touching any endpoint logic.
+router = APIRouter(prefix="/api/v1", tags=["v1"])
+
+
+# =============================================================================
+# AUTHENTICATION POLICY                                          [Fix 9]
+# =============================================================================
+# This application is intentionally PUBLIC — no login or token is required.
+# It is a demo/educational tool. The sole abuse-prevention layer is per-IP
+# rate limiting (slowapi) applied on the /api/v1/analyze endpoint.
+# The Google Gemini free-tier quota (1,500 req/day account-wide) acts as a
+# hard external cap.
+#
+# If this app is ever monetised or moved to a paid API tier, add API-key
+# authentication using FastAPI's `Security` + `APIKeyHeader` dependency
+# before the endpoint is exposed to the public.
+# =============================================================================
+
+
+@router.post("/analyze")
+@limiter.limit("5/minute")   # SECURITY FIX [2a]: Per-IP burst cap (5 req/min)
+@limiter.limit("100/day")   # SECURITY FIX [2b]: Per-IP daily quota (100 req/day)
 async def analyze_symptoms(request: Request, body: SymptomRequest):
     """
     Analyses patient symptoms using the Google Gemini API.
 
-    Rate limit: 10 requests per minute per IP.
+    Rate limit: 5 requests per minute + 100 requests per day per IP.
     Input limit: 2000 characters.
     """
 
@@ -268,6 +304,11 @@ async def analyze_symptoms(request: Request, body: SymptomRequest):
             status_code=500,
             detail="An internal error occurred. Please try again later.",
         )
+
+
+# Register the versioned router onto the main app.
+# All routes defined above become accessible at their /api/v1/... paths.
+app.include_router(router)
 
 
 # =============================================================================

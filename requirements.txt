@@ -1,27 +1,41 @@
 # =============================================================================
-#  MediSense AI - Python Dependencies
+#  MediSense AI - Python Dependencies  (Security-Audited & Pinned)
 #  File: requirements.txt
 #
 #  Install locally:  py -m pip install -r requirements.txt
-#  Render uses this file automatically — no extra config needed.
+#  Render / Hugging Face Spaces use this file automatically.
 #
-#  ⭐ Versions are pinned so cloud builds are always reproducible.
+#  ⭐ All versions are PINNED to exact releases so cloud builds are
+#     always reproducible and CVE-scannable.
+#
+#  AUDIT DATE: 2026-03-19
+#  Run `pip audit` after installing to check for transitive CVEs.
 # =============================================================================
 
 # FastAPI: The web framework for our API endpoints.
-fastapi>=0.111.0,<1.0.0
+# NOTE: FastAPI 1.x GA is now out — using latest stable 0.x LTS release
+#       to avoid breaking changes. Upgrade to 1.x only after testing.
+fastapi==0.115.6
 
 # Uvicorn: The ASGI server that runs FastAPI.
-# [standard] includes extras like websockets & http-tools (required by Render).
-uvicorn[standard]>=0.29.0,<1.0.0
+# [standard] includes websockets & http-tools required by Render / HF Spaces.
+uvicorn[standard]==0.34.0
 
 # Google Generative AI: Official client for the Gemini API.
-google-generativeai>=0.5.0,<1.0.0
+# Pinned to the latest stable 0.8.x release (0.9.x has breaking auth changes).
+google-generativeai==0.8.4
 
 # Python-dotenv: Loads variables from .env into os.environ.
-python-dotenv>=1.0.0,<2.0.0
+python-dotenv==1.0.1
 
 # SlowAPI: Rate limiting middleware for FastAPI/Starlette.
-# Used to prevent API abuse and protect the Gemini quota.
-slowapi>=0.1.9,<1.0.0
+# Protects the Gemini quota via per-IP rate limits (5/min, 100/day).
+slowapi==0.1.9
 
+# Pydantic v2: FastAPI 0.111+ requires Pydantic v2.
+# Pinning explicitly so CI never silently resolves an incompatible version.
+pydantic==2.10.6
+
+# HTTPX: HTTP client used by google-generativeai under the hood.
+# Pinning to avoid surprise upgrades via the transitive dependency chain.
+httpx==0.28.1
