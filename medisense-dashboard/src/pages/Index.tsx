@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Activity,
   ShieldAlert,
@@ -63,6 +63,17 @@ async function analyzeSymptoms(symptoms: string): Promise<AnalysisResult> {
   return res.json();
 }
 
+// Ping the backend health-check endpoint so the HF Space wakes up.
+async function pingBackend(): Promise<boolean> {
+  try {
+    const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+    const res = await fetch(`${apiUrl}/`, { method: "GET" });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -107,6 +118,28 @@ const Index = () => {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [backendReady, setBackendReady] = useState<"unknown" | "warming" | "ready">("unknown");
+
+  // Ping the backend on page load so the HF Space wakes up from sleep.
+  // Free-tier HF Spaces sleep after ~30 min of inactivity.
+  useEffect(() => {
+    setBackendReady("warming");
+    pingBackend().then((ok) => {
+      setBackendReady(ok ? "ready" : "warming");
+      // If still not ready, keep retrying every 5 seconds for up to 60s.
+      if (!ok) {
+        let attempts = 0;
+        const interval = setInterval(async () => {
+          attempts++;
+          const alive = await pingBackend();
+          if (alive || attempts >= 12) {
+            clearInterval(interval);
+            setBackendReady(alive ? "ready" : "ready"); // proceed regardless after 60s
+          }
+        }, 5000);
+      }
+    });
+  }, []);
 
   const handleAnalyze = async () => {
     if (!symptoms.trim() || loading) return;
@@ -155,6 +188,21 @@ const Index = () => {
             <Waveform />
           </div>
         </header>
+
+        {/* Warm-up banner: shown while backend is waking */}
+        {backendReady === "warming" && (
+          <div
+            className="mb-6 glass rounded-2xl p-3 border border-primary/30 bg-primary/5 flex items-center gap-3"
+            role="status"
+          >
+            <Loader2 className="w-4 h-4 text-primary animate-spin flex-shrink-0" />
+            <p className="text-sm text-primary/80">
+              <span className="font-semibold">Warming up neural engine…</span>{" "}
+              The AI backend is starting from sleep — this takes ~30 seconds on
+              first load. Analysis will be available shortly.
+            </p>
+          </div>
+        )}
 
         {/* === ALWAYS-VISIBLE DISCLAIMER (before submit) === */}
         {/* SECURITY FIX: Shown unconditionally so every user sees it before
